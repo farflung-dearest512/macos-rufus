@@ -1,107 +1,80 @@
 #!/usr/bin/env python3
 """macos-rufus: create bootable Windows USB drives on macOS."""
 
-import json
 import os
-import re
+import plistlib
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    FileSizeColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TransferSpeedColumn,
-)
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
-from rich import print as rprint
 
 console = Console()
 
 FAT32_LIMIT = 4 * 1024 ** 3  # 4 GiB
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def run(cmd: list[str], check=True, capture=True, **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        cmd,
-        check=check,
-        capture_output=capture,
-        text=True,
-        **kw,
-    )
+    return subprocess.run(cmd, check=check, capture_output=capture, text=True, **kw)
 
 
 def escalate_to_root():
-    """Re-exec the script under sudo if not already root — prompts for password automatically."""
+    """Re-exec under sudo if not root — macOS will prompt for password."""
     if os.geteuid() != 0:
         console.print("[dim]Root access required — you may be prompted for your password.[/dim]")
         os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
 
 
-def _brew_path() -> str | None:
-    return shutil.which("brew")
-
-
-def _install_wimlib():
-    brew = _brew_path()
+def _brew_run(args: list[str]):
+    brew = shutil.which("brew")
     if not brew:
         console.print(
-            "[red]Homebrew not found.[/red] "
-            "Install Homebrew first: [bold]https://brew.sh[/bold]\n"
-            "Then run: [bold]brew install wimlib[/bold]"
+            "[red]Homebrew not found.[/red] Install: [bold]https://brew.sh[/bold]"
         )
         sys.exit(1)
-    console.print("[yellow]Installing wimlib via Homebrew...[/yellow]")
-    # brew must run as the original user, not root — get login user
     login_user = os.environ.get("SUDO_USER") or os.environ.get("USER", "")
     if login_user and os.geteuid() == 0:
-        subprocess.run(["sudo", "-u", login_user, brew, "install", "wimlib"], check=True)
+        subprocess.run(["sudo", "-u", login_user, brew] + args, check=True)
     else:
-        subprocess.run([brew, "install", "wimlib"], check=True)
-    if not shutil.which("wimlib-imagex"):
-        console.print("[red]wimlib install failed. Install manually: brew install wimlib[/red]")
-        sys.exit(1)
-    console.print("[green]wimlib installed.[/green]")
+        subprocess.run([brew] + args, check=True)
+
+
+def _auto_install(package: str, binary: str, reason: str):
+    console.print(f"[yellow]{binary} not found[/yellow] — {reason}")
+    if Confirm.ask(f"Auto-install [bold]{package}[/bold] via Homebrew?", default=True):
+        _brew_run(["install", package])
+        if not shutil.which(binary):
+            console.print(f"[red]Install failed. Run manually: brew install {package}[/red]")
+            sys.exit(1)
+        console.print(f"[green]✓ {package} installed[/green]")
+    else:
+        console.print(f"[dim]Skipping {package}.[/dim]")
 
 
 def check_deps():
-    missing_critical = []
     for tool in ("hdiutil", "diskutil", "rsync"):
         if not shutil.which(tool):
-            missing_critical.append(tool)
-    if missing_critical:
-        console.print(f"[red]Missing required macOS tools: {', '.join(missing_critical)}[/red]")
-        sys.exit(1)
+            console.print(f"[red]Missing required macOS tool: {tool}[/red]")
+            sys.exit(1)
 
     if not shutil.which("wimlib-imagex"):
-        console.print(
-            "[yellow]wimlib-imagex not found[/yellow] — needed for Windows 11 ISOs (install.wim > 4 GiB)."
+        _auto_install(
+            "wimlib", "wimlib-imagex",
+            "needed for Windows 11 ISOs where install.wim > 4 GiB"
         )
-        if Confirm.ask("Auto-install wimlib via Homebrew now?", default=True):
-            _install_wimlib()
-        else:
-            console.print(
-                "[dim]Skipping. If install.wim > 4 GiB the copy step will fail.[/dim]"
-            )
 
 
 # ── ISO ───────────────────────────────────────────────────────────────────────
 
 def ask_iso_path() -> Path:
     while True:
-        raw = Prompt.ask("\n[bold cyan]Path to Windows ISO[/bold cyan]").strip()
-        raw = raw.strip("'\"")  # handle drag-drop quoting
+        raw = Prompt.ask("\n[bold cyan]Path to Windows ISO[/bold cyan]").strip().strip("'\"")
         p = Path(raw).expanduser().resolve()
         if not p.exists():
             console.print(f"[red]Not found:[/red] {p}")
@@ -112,32 +85,60 @@ def ask_iso_path() -> Path:
 
 
 def mount_iso(iso: Path) -> str:
-    """Mount ISO with hdiutil, return mount point."""
+    """Mount ISO read-only via hdiutil, return mount point path."""
     console.print(f"\n[dim]Mounting {iso.name}...[/dim]")
     result = run(["hdiutil", "attach", "-nobrowse", "-readonly", str(iso)])
-    # last line of output contains mount point
     for line in reversed(result.stdout.strip().splitlines()):
         parts = line.split("\t")
         if len(parts) >= 3 and parts[-1].strip().startswith("/"):
             return parts[-1].strip()
-    raise RuntimeError(f"Could not parse mount point from hdiutil output:\n{result.stdout}")
+    raise RuntimeError(f"Could not parse mount point:\n{result.stdout}")
 
 
 def unmount_iso(mount_point: str):
     run(["hdiutil", "detach", mount_point, "-force"], check=False)
 
 
+def detect_iso(mount_point: str) -> dict:
+    """Inspect ISO contents and report boot capabilities."""
+    mp = Path(mount_point)
+    has_uefi      = (mp / "efi" / "boot" / "bootx64.efi").exists()
+    has_bootsect  = (mp / "boot" / "bootsect.dat").exists()
+    has_bootmgr   = (mp / "bootmgr").exists()
+    is_win7_era   = has_bootmgr and not has_uefi
+
+    t = Table(title="ISO Analysis", show_lines=False, box=None, padding=(0, 2))
+    t.add_column("Property", style="dim")
+    t.add_column("Value", style="bold")
+    t.add_row("UEFI boot (efi/boot/bootx64.efi)",
+              "[green]Yes[/green]" if has_uefi else "[red]No[/red]")
+    t.add_row("Legacy BIOS boot (bootmgr)",
+              "[green]Yes[/green]" if has_bootmgr else "[red]No[/red]")
+    t.add_row("VBR source (boot/bootsect.dat)",
+              "[green]Yes[/green]" if has_bootsect else "[yellow]Missing[/yellow]")
+    t.add_row("Detected type",
+              "[yellow]Windows 7 / 8 legacy[/yellow]" if is_win7_era
+              else "[cyan]Windows 8.1 / 10 / 11[/cyan]")
+    console.print()
+    console.print(t)
+
+    if is_win7_era:
+        console.print(
+            "[yellow]No UEFI boot files found.[/yellow] Will write legacy BIOS boot sector.\n"
+            "[dim]Target PC may need CSM / Legacy Boot enabled in BIOS.[/dim]"
+        )
+
+    return {"uefi": has_uefi, "has_bootsect": has_bootsect, "is_win7_era": is_win7_era}
+
+
 # ── USB detection ─────────────────────────────────────────────────────────────
 
 def list_usb_drives() -> list[dict]:
-    """Return list of external disk dicts via diskutil list -plist."""
     result = run(["diskutil", "list", "-plist", "external", "physical"])
-    import plistlib
     data = plistlib.loads(result.stdout.encode())
     disks = []
     for dev in data.get("WholeDisks", []):
-        info_result = run(["diskutil", "info", "-plist", dev])
-        info = plistlib.loads(info_result.stdout.encode())
+        info = plistlib.loads(run(["diskutil", "info", "-plist", dev]).stdout.encode())
         disks.append({
             "node": f"/dev/{dev}",
             "name": info.get("MediaName", "Unknown"),
@@ -156,18 +157,16 @@ def fmt_size(b: int) -> str:
 
 
 def ask_usb(drives: list[dict]) -> dict:
-    table = Table(title="Detected USB Drives", show_lines=True)
-    table.add_column("#", style="bold cyan", width=3)
-    table.add_column("Device", style="bold")
-    table.add_column("Name")
-    table.add_column("Size", justify="right")
-    table.add_column("Bus")
-
+    t = Table(title="Detected USB Drives", show_lines=True)
+    t.add_column("#", style="bold cyan", width=3)
+    t.add_column("Device", style="bold")
+    t.add_column("Name")
+    t.add_column("Size", justify="right")
+    t.add_column("Bus")
     for i, d in enumerate(drives, 1):
-        table.add_row(str(i), d["node"], d["name"], fmt_size(d["size"]), d["protocol"])
-
+        t.add_row(str(i), d["node"], d["name"], fmt_size(d["size"]), d["protocol"])
     console.print()
-    console.print(table)
+    console.print(t)
 
     while True:
         raw = Prompt.ask("[bold cyan]Select USB drive number[/bold cyan]")
@@ -177,119 +176,159 @@ def ask_usb(drives: list[dict]) -> dict:
                 return drives[idx]
         except ValueError:
             pass
-        console.print(f"[red]Enter a number between 1 and {len(drives)}.[/red]")
+        console.print(f"[red]Enter 1–{len(drives)}.[/red]")
 
 
 # ── disk prep ─────────────────────────────────────────────────────────────────
 
-def unmount_disk_partitions(disk_node: str):
-    run(["diskutil", "unmountDisk", disk_node], check=False)
-
-
 def format_usb(disk_node: str):
-    """Erase USB as FAT32 with MBR scheme — broadest UEFI + BIOS compat."""
+    """Erase and format USB as FAT32 + MBR — widest UEFI + BIOS compat."""
     console.print(f"\n[yellow]Erasing {disk_node} as FAT32 (MBR)...[/yellow]")
-    run(
-        [
-            "diskutil", "eraseDisk", "FAT32", "WINUSB",
-            "MBRFormat", disk_node,
-        ],
-        capture=False,
-    )
+    run(["diskutil", "eraseDisk", "FAT32", "WINUSB", "MBRFormat", disk_node], capture=False)
 
 
 def get_volume_path(disk_node: str) -> Path:
-    """Return /Volumes/... path for first partition of disk."""
-    import plistlib
-    result = run(["diskutil", "info", "-plist", disk_node + "s1"])
-    info = plistlib.loads(result.stdout.encode())
+    info = plistlib.loads(run(["diskutil", "info", "-plist", disk_node + "s1"]).stdout.encode())
     mp = info.get("MountPoint", "")
     if not mp:
-        raise RuntimeError(f"Could not find mount point for {disk_node}s1")
+        raise RuntimeError(f"No mount point for {disk_node}s1")
     return Path(mp)
+
+
+def set_mbr_active_partition(disk_node: str):
+    """
+    Set first MBR partition entry as active (bootable flag = 0x80).
+    Required for legacy BIOS to hand off to the VBR.
+    Partition table starts at MBR byte 446; each entry is 16 bytes.
+    """
+    raw = disk_node.replace("/dev/disk", "/dev/rdisk")
+    with open(raw, "rb") as f:
+        mbr = bytearray(f.read(512))
+    for i, off in enumerate((446, 462, 478, 494)):
+        mbr[off] = 0x80 if i == 0 else 0x00
+    with open(raw, "r+b") as f:
+        f.seek(0)
+        f.write(mbr)
+    console.print("[green]✓ MBR active partition flag set[/green]")
+
+
+def write_windows_vbr(disk_node: str, iso_mount: str):
+    """
+    Patch the FAT32 VBR on the USB partition with Windows boot code.
+
+    Windows ISOs ship boot/bootsect.dat — the exact VBR code Windows needs.
+    We merge it with the BPB (bytes 3-89) that diskutil wrote during format
+    so the FAT32 filesystem metadata stays intact while the boot code becomes
+    Windows-compatible. Without this, legacy BIOS boot silently fails on Win7.
+
+    Byte layout of a FAT32 boot sector:
+      0-2   : jump instruction          ← take from bootsect.dat
+      3-89  : BIOS Parameter Block      ← keep from diskutil (filesystem data)
+      90-509: boot code                 ← take from bootsect.dat
+      510-511: 0x55AA signature         ← take from bootsect.dat
+    """
+    bootsect = Path(iso_mount) / "boot" / "bootsect.dat"
+    if not bootsect.exists():
+        console.print(
+            "[yellow]boot/bootsect.dat not found in ISO — skipping VBR write.[/yellow]\n"
+            "[dim]Legacy BIOS boot (Win7) may not work.[/dim]"
+        )
+        return
+
+    partition_node = disk_node + "s1"
+    raw_part = partition_node.replace("/dev/disk", "/dev/rdisk")
+
+    with open(bootsect, "rb") as f:
+        new_vbr = bytearray(f.read(512))
+
+    # Unmount partition so macOS doesn't interfere with raw sector write
+    run(["diskutil", "unmount", partition_node], check=False)
+
+    with open(raw_part, "rb") as f:
+        current_vbr = bytearray(f.read(512))
+
+    merged = bytearray(512)
+    merged[0:3]    = new_vbr[0:3]        # jump
+    merged[3:90]   = current_vbr[3:90]   # BPB preserved
+    merged[90:512] = new_vbr[90:512]     # Windows boot code + signature
+
+    with open(raw_part, "r+b") as f:
+        f.seek(0)
+        f.write(merged)
+
+    console.print("[green]✓ Windows FAT32 VBR written[/green]")
+
+    # Remount so file copy can proceed
+    run(["diskutil", "mount", partition_node], check=True)
+    console.print("[green]✓ Partition remounted[/green]")
 
 
 # ── file copy ─────────────────────────────────────────────────────────────────
 
 def get_wim_path(mount_point: str) -> Path | None:
-    candidates = [
-        Path(mount_point) / "sources" / "install.wim",
-        Path(mount_point) / "sources" / "install.esd",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
+    for name in ("install.wim", "install.esd"):
+        p = Path(mount_point) / "sources" / name
+        if p.exists():
+            return p
     return None
 
 
 def copy_files_except_wim(src: str, dst: Path):
-    console.print("\n[dim]Copying boot files (excluding install.wim)...[/dim]")
+    console.print("\n[dim]Copying boot files (excluding install.wim/esd)...[/dim]")
     run(
         [
             "rsync", "-a", "--progress",
             "--exclude=sources/install.wim",
             "--exclude=sources/install.esd",
-            f"{src}/",
-            str(dst) + "/",
+            f"{src}/", str(dst) + "/",
         ],
         capture=False,
     )
 
 
 def split_and_copy_wim(wim_path: Path, dst: Path):
-    """Split install.wim into FAT32-safe chunks and copy."""
+    """Split install.wim into ≤3800 MB chunks (FAT32 safe) via wimlib."""
     if not shutil.which("wimlib-imagex"):
-        raise RuntimeError(
-            "install.wim is > 4 GiB but wimlib-imagex is not installed.\n"
-            "Run: brew install wimlib"
-        )
+        raise RuntimeError("wimlib-imagex missing. Run: brew install wimlib")
     out_dir = dst / "sources"
     out_dir.mkdir(parents=True, exist_ok=True)
-    swm_prefix = str(out_dir / "install.swm")
-    console.print(
-        f"\n[yellow]install.wim is > 4 GiB — splitting into .swm chunks...[/yellow]"
-    )
-    run(
-        ["wimlib-imagex", "split", str(wim_path), swm_prefix, "3800"],
-        capture=False,
-    )
+    console.print(f"\n[yellow]install.wim > 4 GiB — splitting into .swm chunks...[/yellow]")
+    run(["wimlib-imagex", "split", str(wim_path), str(out_dir / "install.swm"), "3800"],
+        capture=False)
 
 
 def copy_wim_direct(wim_path: Path, dst: Path):
-    dst_sources = dst / "sources"
-    dst_sources.mkdir(parents=True, exist_ok=True)
-    dst_file = dst_sources / wim_path.name
+    dst_dir = dst / "sources"
+    dst_dir.mkdir(parents=True, exist_ok=True)
     console.print(f"\n[dim]Copying {wim_path.name} ({fmt_size(wim_path.stat().st_size)})...[/dim]")
-    run(["rsync", "-ah", "--progress", str(wim_path), str(dst_file)], capture=False)
+    run(["rsync", "-ah", "--progress", str(wim_path), str(dst_dir / wim_path.name)],
+        capture=False)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    console.print(
-        Panel(
-            "[bold white]macos-rufus[/bold white]  —  Windows bootable USB creator",
-            subtitle="macOS · UEFI/BIOS · FAT32",
-            style="bold blue",
-        )
-    )
+    console.print(Panel(
+        "[bold white]macos-rufus[/bold white]  —  Windows bootable USB creator",
+        subtitle="macOS · UEFI + Legacy BIOS · Win7/8/8.1/10/11",
+        style="bold blue",
+    ))
 
     escalate_to_root()
     check_deps()
 
-    # 1. ISO
+    # 1. ISO path
     iso_path = ask_iso_path()
 
-    # 2. USB
+    # 2. USB selection
     drives = list_usb_drives()
     if not drives:
-        console.print("[red]No external USB drives detected. Plug one in and retry.[/red]")
+        console.print("[red]No external USB drives detected.[/red]")
         sys.exit(1)
-
     selected = ask_usb(drives)
     disk_node = selected["node"]
 
-    # 3. Confirm — destructive
+    # 3. Confirm destructive action
     console.print(
         f"\n[bold red]WARNING:[/bold red] "
         f"[white]{disk_node}[/white] ([yellow]{selected['name']}[/yellow], "
@@ -301,52 +340,61 @@ def main():
 
     mount_point = None
     try:
-        # 4. Mount ISO
+        # 4. Mount ISO + detect type
         mount_point = mount_iso(iso_path)
         console.print(f"[green]ISO mounted at:[/green] {mount_point}")
+        iso_info = detect_iso(mount_point)
 
         # 5. Format USB
-        unmount_disk_partitions(disk_node)
+        run(["diskutil", "unmountDisk", disk_node], check=False)
         format_usb(disk_node)
 
+        # 6. Write Windows boot sector (legacy BIOS support — Win7 + fallback for all)
+        console.print("\n[dim]Writing boot sectors...[/dim]")
+        set_mbr_active_partition(disk_node)
+        write_windows_vbr(disk_node, mount_point)
+
+        # 7. Get volume path (partition remounted by write_windows_vbr)
         usb_volume = get_volume_path(disk_node)
         console.print(f"[green]USB volume:[/green] {usb_volume}")
 
-        # 6. Copy files
+        # 8. Copy files
         wim_path = get_wim_path(mount_point)
         copy_files_except_wim(mount_point, usb_volume)
 
         if wim_path:
-            size = wim_path.stat().st_size
-            if size > FAT32_LIMIT:
+            if wim_path.stat().st_size > FAT32_LIMIT:
                 split_and_copy_wim(wim_path, usb_volume)
             else:
                 copy_wim_direct(wim_path, usb_volume)
         else:
-            console.print("[yellow]No install.wim/install.esd found — ISO may be unusual.[/yellow]")
+            console.print("[yellow]No install.wim/install.esd found in ISO.[/yellow]")
 
-        # 7. Flush
+        # 9. Flush and eject
         console.print("\n[dim]Flushing writes...[/dim]")
         run(["diskutil", "unmountDisk", disk_node], check=False)
 
-        console.print(
-            Panel(
-                f"[bold green]Done![/bold green]\n\n"
-                f"Bootable Windows USB ready on [white]{disk_node}[/white].\n"
-                f"Eject and boot target machine via UEFI/BIOS boot menu.",
-                style="green",
-            )
+        boot_note = (
+            "UEFI + Legacy BIOS boot supported."
+            if iso_info["uefi"]
+            else "Legacy BIOS only — enable CSM in target PC BIOS if needed."
         )
+        console.print(Panel(
+            f"[bold green]Done![/bold green]\n\n"
+            f"Bootable Windows USB ready on [white]{disk_node}[/white].\n"
+            f"{boot_note}",
+            style="green",
+        ))
 
     except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted by user.[/yellow]")
+        console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(1)
     except Exception as e:
         console.print(f"\n[bold red]Error:[/bold red] {e}")
         sys.exit(1)
     finally:
         if mount_point:
-            console.print(f"[dim]Unmounting ISO...[/dim]")
+            console.print("[dim]Unmounting ISO...[/dim]")
             unmount_iso(mount_point)
 
 
