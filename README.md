@@ -51,7 +51,25 @@ If you've ever searched for:
 
 ## 🚀 Quick Start
 
-### 1. Prerequisites
+### Option 1 — Homebrew (recommended)
+
+```bash
+brew install yaviral17/macos-rufus/macos-rufus
+```
+
+Then run from anywhere:
+
+```bash
+macos-rufus
+```
+
+> `wimlib` is installed automatically as a dependency.
+
+---
+
+### Option 2 — Run from source
+
+**1. Prerequisites**
 
 Install [Homebrew](https://brew.sh) if you haven't already. That's it — the script handles the rest.
 
@@ -60,21 +78,21 @@ Install [Homebrew](https://brew.sh) if you haven't already. That's it — the sc
 > brew install wimlib   # needed for Windows 11 ISOs where install.wim > 4 GB
 > ```
 
-### 2. Clone the repo
+**2. Clone the repo**
 
 ```bash
-git clone https://github.com/yourusername/macos-rufus.git
+git clone https://github.com/yaviral17/macos-rufus.git
 cd macos-rufus
 ```
 
-### 3. Set up the Python virtual environment
+**3. Set up the Python virtual environment**
 
 ```bash
 python3 -m venv venv
 pip install -r requirements.txt
 ```
 
-### 4. Run it
+**4. Run it**
 
 ```bash
 venv/bin/python3 rufus.py
@@ -265,6 +283,10 @@ Download official ISOs directly from Microsoft:
 
 Run directly — don't use `sudo` yourself:
 ```bash
+# Homebrew install
+macos-rufus
+
+# Source install
 venv/bin/python3 rufus.py
 ```
 The script calls `sudo` internally via `os.execvp` and will prompt for your password.
