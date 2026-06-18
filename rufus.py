@@ -62,7 +62,7 @@ def _auto_install(package: str, binary: str, reason: str):
 
 
 def check_deps():
-    for tool in ("hdiutil", "diskutil", "rsync"):
+    for tool in ("hdiutil", "diskutil"):
         if not shutil.which(tool):
             console.print(f"[red]Missing required macOS tool: {tool}[/red]")
             sys.exit(1)

@@ -43,7 +43,8 @@ If you've ever searched for:
 | **FAT32 + MBR format** | Maximum compatibility across UEFI and legacy BIOS systems |
 | **Interactive USB picker** | Lists all connected USB drives with size and name — no guessing device paths |
 | **Safe by design** | External-only disk listing, explicit warning, manual confirm before any write |
-| **Beautiful terminal UI** | Powered by `rich` — color, tables, progress |
+| **Parallel file copy** | 4-thread concurrent copy with 1 MB buffers — saturates USB write bandwidth |
+| **Beautiful terminal UI** | Powered by `rich` — color, tables, progress bars with speed + ETA |
 | **Drag-and-drop ISO path** | Drag your `.iso` file into the terminal — quoted paths handled automatically |
 
 ---
@@ -141,8 +142,8 @@ The tool will:
 2. Erase and format the USB as FAT32 + MBR
 3. Set the MBR active partition flag (legacy BIOS boot requirement)
 4. Write the Windows FAT32 VBR from `boot/bootsect.dat` in the ISO (Win7 support)
-5. Copy all boot files via `rsync`
-6. Detect if `install.wim` exceeds 4 GiB and split it automatically
+5. Copy all boot files in parallel (4 threads, 1 MB buffers) with live progress bar
+6. Copy `install.wim` via `os.sendfile` with speed + ETA display — or split automatically if > 4 GiB
 7. Flush writes and unmount cleanly
 
 ---
@@ -204,9 +205,10 @@ MBR + FAT32 is chosen deliberately:
 |---|---|---|
 | `hdiutil` | macOS built-in | Mount ISO as read-only volume |
 | `diskutil` | macOS built-in | List disks, erase, format, mount/unmount |
-| `rsync` | macOS built-in | Copy files with progress |
 | `wimlib-imagex` | Homebrew (`wimlib`) | Split install.wim > 4 GiB |
-| `rich` | pip | Terminal UI |
+| `rich` | pip | Terminal UI — progress bars, tables, color |
+| Python `os.sendfile` | stdlib | Kernel-space WIM copy — no userspace buffer overhead |
+| Python `ThreadPoolExecutor` | stdlib | Parallel boot file copy across 4 threads |
 | Python `struct` | stdlib | Write MBR active flag + merge VBR sectors |
 
 ---
@@ -295,7 +297,7 @@ macos-rufus/
 Pull requests welcome. Focus areas:
 
 - [ ] GPT + ExFAT/NTFS support for pure-UEFI installs (removes 4 GiB limit entirely)
-- [ ] Progress bar for WIM split operation
+- [ ] Progress bar for WIM split operation (`wimlib-imagex split`)
 - [ ] ISO SHA256 verification against Microsoft checksums
 - [ ] Windows Server ISO support
 - [ ] GUI wrapper (Tkinter or native macOS via PyObjC)
