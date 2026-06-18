@@ -18,7 +18,7 @@ from rich.progress import (BarColumn, FileSizeColumn, MofNCompleteColumn,
                            Progress, TextColumn, TimeRemainingColumn,
                            TransferSpeedColumn)
 from rich.prompt import Confirm, Prompt
-from rich.table import Table
+from rich.table import Column, Table
 from rich.text import Text
 
 console = Console()
@@ -321,7 +321,8 @@ def copy_files_except_wim(src: str, dst: Path):
 
     console.print("\n[dim]Copying boot files...[/dim]")
     with Progress(
-        TextColumn("[cyan]{task.fields[filename]}[/cyan]", justify="left"),
+        TextColumn("[cyan]{task.fields[filename]}[/cyan]", justify="left",
+                   table_column=Column(width=35, no_wrap=True)),
         BarColumn(),
         MofNCompleteColumn(),
         console=console,
@@ -359,7 +360,8 @@ def copy_wim_direct(wim_path: Path, dst: Path):
 
     console.print(f"\n[dim]Copying {wim_path.name} ({fmt_size(size)})...[/dim]")
     with Progress(
-        TextColumn("[cyan]{task.fields[filename]}[/cyan]"),
+        TextColumn("[cyan]{task.fields[filename]}[/cyan]",
+                   table_column=Column(width=35, no_wrap=True)),
         BarColumn(),
         FileSizeColumn(),
         TransferSpeedColumn(),
