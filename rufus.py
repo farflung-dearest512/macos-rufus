@@ -6,10 +6,14 @@ import plistlib
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import (BarColumn, FileSizeColumn, MofNCompleteColumn,
+                           Progress, TextColumn, TimeRemainingColumn,
+                           TransferSpeedColumn)
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
@@ -202,6 +206,8 @@ def set_mbr_active_partition(disk_node: str):
     Partition table starts at MBR byte 446; each entry is 16 bytes.
     """
     raw = disk_node.replace("/dev/disk", "/dev/rdisk")
+    # Must unmount before opening raw disk device — macOS blocks rdisk while mounted
+    run(["diskutil", "unmountDisk", disk_node], check=False)
     with open(raw, "rb") as f:
         mbr = bytearray(f.read(512))
     for i, off in enumerate((446, 462, 478, 494)):
@@ -273,17 +279,46 @@ def get_wim_path(mount_point: str) -> Path | None:
     return None
 
 
+_COPY_BUF = 1024 * 1024  # 1 MB buffer — faster than shutil default 16 KB
+_COPY_WORKERS = 4        # 4 threads: good I/O parallelism without hammering USB
+
+
+def _copy_one(src_file: Path, dst_file: Path):
+    with src_file.open("rb") as fsrc, dst_file.open("wb") as fdst:
+        shutil.copyfileobj(fsrc, fdst, length=_COPY_BUF)
+    shutil.copystat(src_file, dst_file)
+    return src_file
+
+
 def copy_files_except_wim(src: str, dst: Path):
-    console.print("\n[dim]Copying boot files (excluding install.wim/esd)...[/dim]")
-    run(
-        [
-            "rsync", "-a", "--progress",
-            "--exclude=sources/install.wim",
-            "--exclude=sources/install.esd",
-            f"{src}/", str(dst) + "/",
-        ],
-        capture=False,
-    )
+    src_path = Path(src)
+    skip = {src_path / "sources" / "install.wim", src_path / "sources" / "install.esd"}
+    files = [p for p in src_path.rglob("*") if p.is_file() and p not in skip]
+    # Large files first — they take longest, so start them while small files fill in
+    files.sort(key=lambda p: p.stat().st_size, reverse=True)
+
+    # Pre-create all dirs before threads start — avoids mkdir contention
+    for d in {(dst / f.relative_to(src_path)).parent for f in files}:
+        d.mkdir(parents=True, exist_ok=True)
+
+    console.print("\n[dim]Copying boot files...[/dim]")
+    with Progress(
+        TextColumn("[cyan]{task.fields[filename]}[/cyan]", justify="left"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("copy", total=len(files), filename="")
+        with ThreadPoolExecutor(max_workers=_COPY_WORKERS) as pool:
+            futures = {
+                pool.submit(_copy_one, f, dst / f.relative_to(src_path)): f
+                for f in files
+            }
+            for future in as_completed(futures):
+                src_file = futures[future]
+                future.result()  # re-raise any copy error
+                progress.update(task, filename=src_file.relative_to(src_path).name)
+                progress.advance(task)
 
 
 def split_and_copy_wim(wim_path: Path, dst: Path):
@@ -300,9 +335,29 @@ def split_and_copy_wim(wim_path: Path, dst: Path):
 def copy_wim_direct(wim_path: Path, dst: Path):
     dst_dir = dst / "sources"
     dst_dir.mkdir(parents=True, exist_ok=True)
-    console.print(f"\n[dim]Copying {wim_path.name} ({fmt_size(wim_path.stat().st_size)})...[/dim]")
-    run(["rsync", "-ah", "--progress", str(wim_path), str(dst_dir / wim_path.name)],
-        capture=False)
+    dst_file = dst_dir / wim_path.name
+    size = wim_path.stat().st_size
+    chunk = 4 * 1024 * 1024  # 4 MB — good balance for USB sequential write
+
+    console.print(f"\n[dim]Copying {wim_path.name} ({fmt_size(size)})...[/dim]")
+    with Progress(
+        TextColumn("[cyan]{task.fields[filename]}[/cyan]"),
+        BarColumn(),
+        FileSizeColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("wim", total=size, filename=wim_path.name)
+        with open(wim_path, "rb") as fsrc, open(dst_file, "wb") as fdst:
+            in_fd, out_fd, offset = fsrc.fileno(), fdst.fileno(), 0
+            while offset < size:
+                sent = os.sendfile(out_fd, in_fd, offset, min(chunk, size - offset))
+                if sent == 0:
+                    break
+                offset += sent
+                progress.advance(task, sent)
+    shutil.copystat(wim_path, dst_file)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -354,7 +409,8 @@ def main():
         set_mbr_active_partition(disk_node)
         write_windows_vbr(disk_node, mount_point)
 
-        # 7. Get volume path (partition remounted by write_windows_vbr)
+        # 7. Ensure partition mounted before file copy
+        run(["diskutil", "mount", disk_node + "s1"], check=False)
         usb_volume = get_volume_path(disk_node)
         console.print(f"[green]USB volume:[/green] {usb_volume}")
 
