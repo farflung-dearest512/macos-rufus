@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """macos-rufus: create bootable Windows USB drives on macOS."""
 
+import logging
 import os
 import plistlib
 import shutil
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
@@ -16,8 +19,23 @@ from rich.progress import (BarColumn, FileSizeColumn, MofNCompleteColumn,
                            TransferSpeedColumn)
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
+from rich.text import Text
 
 console = Console()
+log: logging.Logger = logging.getLogger("rufus")
+
+
+def setup_logger() -> Path:
+    logs_dir = Path(__file__).parent / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    log_path = logs_dir / f"rufus_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.FileHandler(log_path)],
+    )
+    return log_path
 
 FAT32_LIMIT = 4 * 1024 ** 3  # 4 GiB
 
@@ -362,6 +380,11 @@ def copy_wim_direct(wim_path: Path, dst: Path):
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+def fmt_duration(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s}s" if m else f"{s}s"
+
+
 def main():
     console.print(Panel(
         "[bold white]macos-rufus[/bold white]  —  Windows bootable USB creator",
@@ -370,10 +393,13 @@ def main():
     ))
 
     escalate_to_root()
+    log_path = setup_logger()
+    log.info("macos-rufus started")
     check_deps()
 
     # 1. ISO path
     iso_path = ask_iso_path()
+    log.info("ISO: %s", iso_path)
 
     # 2. USB selection
     drives = list_usb_drives()
@@ -382,6 +408,7 @@ def main():
         sys.exit(1)
     selected = ask_usb(drives)
     disk_node = selected["node"]
+    log.info("Target USB: %s (%s, %s)", disk_node, selected["name"], fmt_size(selected["size"]))
 
     # 3. Confirm destructive action
     console.print(
@@ -391,67 +418,102 @@ def main():
     )
     if not Confirm.ask("[bold]Proceed?[/bold]", default=False):
         console.print("Aborted.")
+        log.info("User aborted at confirmation.")
         sys.exit(0)
 
+    start_time = time.monotonic()
     mount_point = None
     try:
         # 4. Mount ISO + detect type
         mount_point = mount_iso(iso_path)
         console.print(f"[green]ISO mounted at:[/green] {mount_point}")
+        log.info("ISO mounted at %s", mount_point)
         iso_info = detect_iso(mount_point)
+        log.info("ISO type: uefi=%s bootsect=%s win7era=%s",
+                 iso_info["uefi"], iso_info["has_bootsect"], iso_info["is_win7_era"])
 
         # 5. Format USB
         run(["diskutil", "unmountDisk", disk_node], check=False)
+        log.info("Formatting %s as FAT32 MBR", disk_node)
         format_usb(disk_node)
 
         # 6. Write Windows boot sector (legacy BIOS support — Win7 + fallback for all)
         console.print("\n[dim]Writing boot sectors...[/dim]")
+        log.info("Writing MBR active partition flag")
         set_mbr_active_partition(disk_node)
+        log.info("Writing Windows VBR")
         write_windows_vbr(disk_node, mount_point)
 
         # 7. Ensure partition mounted before file copy
         run(["diskutil", "mount", disk_node + "s1"], check=False)
         usb_volume = get_volume_path(disk_node)
         console.print(f"[green]USB volume:[/green] {usb_volume}")
+        log.info("USB volume: %s", usb_volume)
 
         # 8. Copy files
         wim_path = get_wim_path(mount_point)
+        log.info("Copying boot files (parallel)")
         copy_files_except_wim(mount_point, usb_volume)
+        log.info("Boot file copy done")
 
         if wim_path:
             if wim_path.stat().st_size > FAT32_LIMIT:
+                log.info("install.wim > 4 GiB — splitting")
                 split_and_copy_wim(wim_path, usb_volume)
+                log.info("WIM split done")
             else:
+                log.info("Copying %s (%s)", wim_path.name, fmt_size(wim_path.stat().st_size))
                 copy_wim_direct(wim_path, usb_volume)
+                log.info("WIM copy done")
         else:
             console.print("[yellow]No install.wim/install.esd found in ISO.[/yellow]")
+            log.warning("No install.wim/install.esd found in ISO")
 
         # 9. Flush and eject
         console.print("\n[dim]Flushing writes...[/dim]")
         run(["diskutil", "unmountDisk", disk_node], check=False)
 
+        elapsed = time.monotonic() - start_time
+        boot_mode = "UEFI + Legacy BIOS" if iso_info["uefi"] else "Legacy BIOS only"
         boot_note = (
-            "UEFI + Legacy BIOS boot supported."
+            "[green]UEFI + Legacy BIOS[/green] boot supported."
             if iso_info["uefi"]
-            else "Legacy BIOS only — enable CSM in target PC BIOS if needed."
+            else "[yellow]Legacy BIOS only[/yellow] — enable CSM in target PC BIOS."
         )
+
+        summary = Table.grid(padding=(0, 2))
+        summary.add_column(style="dim")
+        summary.add_column(style="bold white")
+        summary.add_row("ISO",        iso_path.name)
+        summary.add_row("Drive",      f"{disk_node}  ({selected['name']}, {fmt_size(selected['size'])})")
+        summary.add_row("Boot mode",  boot_note)
+        summary.add_row("Time taken", f"[bold cyan]{fmt_duration(elapsed)}[/bold cyan]")
+        summary.add_row("Log saved",  f"[dim]{log_path}[/dim]")
+
+        console.print()
         console.print(Panel(
-            f"[bold green]Done![/bold green]\n\n"
-            f"Bootable Windows USB ready on [white]{disk_node}[/white].\n"
-            f"{boot_note}",
-            style="green",
+            Text.assemble(("  Done! ", "bold green"), ("Bootable Windows USB is ready.\n\n", "white")),
+            style="bold green",
+            subtitle="[dim]Safe to unplug[/dim]",
         ))
+        console.print(summary)
+        console.print()
+
+        log.info("Finished successfully in %s (%.1fs)", fmt_duration(elapsed), elapsed)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
+        log.warning("Interrupted by user")
         sys.exit(1)
     except Exception as e:
         console.print(f"\n[bold red]Error:[/bold red] {e}")
+        log.error("Fatal error: %s", e, exc_info=True)
         sys.exit(1)
     finally:
         if mount_point:
             console.print("[dim]Unmounting ISO...[/dim]")
             unmount_iso(mount_point)
+            log.info("ISO unmounted")
 
 
 if __name__ == "__main__":
